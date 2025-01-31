@@ -18,7 +18,7 @@ TIgol is designed to provide a set of services for the TI-84 Plus CE calculator 
 
 To use TIgolas a developer, follow these steps:
 
-1. Go to the [Applications Dashboard](https://api.tigol.net/dashboard/applications)
+1. Go to the [Applications Dashboard](https://tigol.net/dashboard/applications)
 2. Create a new application with the required scopes
 3. Save the Client ID and Client Secret, you won't be able to view the secret again.
 4. Look at the examples and use the client ID and secret to achieve some nice stuff!
