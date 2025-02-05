@@ -1,67 +1,60 @@
-import requests
-from flask import Flask, request
+import os
+import dotenv
+from flask import Flask, request, redirect, url_for, make_response, render_template
+from tigol import TIgolApiClient
 
-# Configuration
-CLIENT_ID = "change_me"  # OAuth client ID
-CLIENT_SECRET = "change_me"  # OAuth client secret
-API_BASE_URL = "https://api.tigol.net"  # Base URL for the API
+dotenv.load_dotenv(".env")
 
-app = Flask(__name__)  # Initialize Flask application
+app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super-secret-key")
 
-def get_user_data(code):
-  """
-  Exchange authorization code for access token and retrieve user data.
-  
-  Args:
-    code (str): Authorization code received from the OAuth provider.
-  
-  Returns:
-    dict: User data retrieved from the API.
-  """
-  auth_data = {
-    "client_id": CLIENT_ID,
-    "client_secret": CLIENT_SECRET,
-    "code": code
-  }
-  
-  # Request access token using the authorization code
-  response = requests.post(f"{API_BASE_URL}/auth/oidc/token", json=auth_data)
-  response.raise_for_status()  # Raise an exception for HTTP errors
-  token = response.json()["access_token"]  # Extract access token from response
-  
-  # Request user data using the access token
-  user_data = requests.get(
-    f"{API_BASE_URL}/auth/v1/user/me", 
-    headers={"Authorization": f"Bearer {token}"}
-  ).json()
-  
-  return user_data
+client = TIgolApiClient(
+    os.environ.get("TIGOL_CLIENT_ID"),
+    os.environ.get("TIGOL_CLIENT_SECRET"),
+)
+
+USER_SESSIONS = {}
+
+def retrieve_session():
+    session_id = request.cookies.get("session_id")
+    if not session_id or session_id not in USER_SESSIONS:
+        return None, {}
+    return session_id, USER_SESSIONS[session_id]
+
+@app.route("/")
+def index():
+    return redirect(client.get_authorization_url(redirect_uri=os.environ.get("TIGOL_REDIRECT_URI")))
 
 @app.route("/authorized")
 def authorized():
-  """
-  Handle the OAuth2.0/OIDC authorization callback.
-  
-  Returns:
-    str: HTML page displaying user information.
-  """
-  code = request.args.get("code")  # Get authorization code from query parameters
-  if not code:
-    return "Missing authorization code", 400  # Return error if code is missing
-  
-  user_data = get_user_data(code)  # Retrieve user data using the authorization code
-  
-  # Generate HTML to display user information
-  html = "<h1>User Information</h1>"
-  html += "<p>TIgol OAuth2.0/OIDC Demo</p>"
-  html += "<table border='1'>"
-  
-  # Add user data to the HTML table
-  for key in ['id', 'uuid', 'first_name', 'last_name', 'username', 'email', 'bio', 'created_at', 'updated_at']:
-    html += f"<tr><th>{key}</th><td>{user_data.get(key, '')}</td></tr>"
-  
-  html += "</table>"
-  return html
+    code = request.args.get("code")
+    if not code:
+        return "Missing authorization code", 400
+
+    session_id = request.cookies.get("session_id")
+    if not session_id:
+        session_id = os.urandom(16).hex()
+
+    try:
+        token_obj = client.exchange_code_for_token(code=code)
+        user_obj = client.get_user(token_obj)
+
+        USER_SESSIONS[session_id] = {"token": token_obj, "user_data": user_obj.__dict__}
+
+        response = make_response(redirect(url_for("display")))
+        response.set_cookie("session_id", session_id)
+        return response
+    except Exception as e:
+        return f"Error during authentication: {str(e)}", 500
+
+@app.route("/display")
+def display():
+    _, session_data = retrieve_session()
+    if not session_data.get("user_data"):
+        return render_template("error.html", error_message="Session expired. Log in again.")
+
+    user_data = session_data["user_data"]
+    return render_template("authorized.html", user_data=user_data)
 
 if __name__ == "__main__":
-  app.run(debug=True)  # Run the Flask application in debug mode
+    app.run(debug=True)
